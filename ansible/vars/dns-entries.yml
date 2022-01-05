@@ -1,0 +1,8 @@
+---
+
+zone: example.com
+
+# List of all systems within my local environment
+dns_a_records:
+  - record: test1
+    value: 192.168.121.1yesyes63

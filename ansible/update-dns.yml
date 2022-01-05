@@ -1,0 +1,25 @@
+---
+
+- name: Update entries on Authoritative DNS Server
+  hosts: soa_dnsserver
+  become: yes
+  become_user: root
+
+
+  tasks:
+    - name: Install dependencies
+      ansible.builtin.yum:
+        name: python3-dns
+        state: present
+
+    - name: Get shared variables
+      ansible.builtin.include_vars: "{{ playbook_dir }}/vars/dns-entries.yml"
+
+    - name: Update DNS entries
+      community.general.nsupdate:
+        server: 127.0.0.1
+        zone: "{{ zone }}"
+        record: "{{ item.record }}"
+        value: "{{ item.value }}"
+      loop: "{{ dns_a_records }}"
+      notify: restart named

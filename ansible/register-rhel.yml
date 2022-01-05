@@ -1,0 +1,42 @@
+---
+
+- name: Red Hat Registration
+  hosts: all
+  become: true
+  become_user: root
+
+  vars_prompt:
+    - name: rhel_username
+      prompt: Username
+      private: no
+
+    - name: rhel_password
+      prompt: Password
+      private: yes
+
+  tasks:
+    - name: Register RHEL VMs
+      community.general.redhat_subscription:
+        state: present
+        username: "{{ rhel_username }}"
+        password: "{{ rhel_password }}"
+        auto_attach: true
+      no_log: true
+      async: 60
+      poll: 0
+      register: rhel_subscription
+
+    - name: Check on subscription task
+      ansible.builtin.async_status:
+        jid: "{{ rhel_subscription.ansible_job_id }}"
+      register: job_result
+      until: job_result.finished
+      retries: 20
+      delay: 10
+
+    - name: Refresh cache
+      ansible.builtin.yum:
+        update_cache: true
+        state: latest
+      when: job_result.finished
+

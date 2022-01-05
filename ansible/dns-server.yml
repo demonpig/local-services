@@ -1,0 +1,121 @@
+---
+
+- name: Authoritative DNS Server Setup
+  hosts: all
+  become: true
+  become_user: root
+
+  vars:
+    zone_file: /var/named/named.example.com
+
+  handlers:
+    - name: check named config
+      ansible.builtin.command: named-checkconf
+      changed_when: false
+
+    - name: check named zone file
+      ansible.builtin.command: named-checkzone example.com {{ zone_file }}
+      changed_when: false
+
+    - name: restart named
+      ansible.builtin.service:
+        name: named
+        state: restarted
+
+  tasks:
+    - name: Disable firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: stopped
+        enabled: false
+
+    - name: Install dependencies
+      ansible.builtin.yum:
+        name: "{{ pkgs }}"
+        state: present
+      vars:
+        pkgs:
+          - bind
+          - bind-utils
+          - python3-dns
+    
+    - name: Set named to listen on any interface
+      ansible.builtin.lineinfile:
+        path: /etc/named.conf
+        search_string: "{{ item.search }}"
+        line: "\t{{ item.replace }}"
+        owner: root
+        group: named
+        mode: 0640
+        state: present
+      loop:
+        # IPv4
+        - search: '{ 127.0.0.1; };'
+          replace: 'listen-on port 53 { any; };'
+        # IPv6
+        - search: '{ ::1; };'
+          replace: 'listen-on-v6 port 53 { any; };'
+      notify:
+        - check named config
+        - restart named
+
+    - name: Disable recursion
+      ansible.builtin.lineinfile:
+        path: /etc/named.conf
+        search_string: "recursion yes;"
+        line: "\trecursion no;"
+        owner: root
+        group: named
+        mode: 0640
+        state: present
+      notify:
+        - check named config
+        - restart named
+
+    - name: Configure extra global options for named
+      ansible.builtin.lineinfile:
+        path: /etc/named.conf
+        line: "\t{{ item }}"
+        insertafter: 'recursion no;'
+        owner: root
+        group: named
+        mode: 0640
+        state: present
+      loop:
+        - 'allow-transfer  { none; };'
+        - 'querylog yes;'
+        - 'version "Not Available";'
+      notify:
+        - check named config
+        - restart named
+
+    - name: Insert example.com zone file
+      ansible.builtin.blockinfile:
+        block: |
+          zone "example.com" {
+            type master;
+            file "{{ zone_file }}";
+            allow-query { any; };
+            allow-update { localhost; };
+          };
+        path: /etc/named.conf
+        insertbefore: '(.*)rfc1912.zones(.*)'
+        marker: "//{mark} ANSIBLE MANAGED BLOCK"
+        owner: root
+        group: named
+        mode: 0640
+        state: present
+      notify:
+        - check named zone file
+        - restart named
+
+    - name: Deploy example.com zone file
+      ansible.builtin.copy:
+        src: files/zones/example.com
+        dest: "{{ zone_file }}"
+        owner: root
+        group: named
+        mode: 0640
+      notify:
+        - check named config
+        - restart named

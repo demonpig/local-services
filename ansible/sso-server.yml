@@ -1,0 +1,73 @@
+---
+
+- name: Single Sign-on Server Setup
+  hosts: all
+  become: true
+  become_user: root
+  gather_facts: true
+
+  handlers:
+    - name: restart sso
+      ansible.builtin.service:
+        name: rh-sso7
+        state: restarted
+
+  vars_files:
+    - vars/redhat-creds.yml
+
+  pre_tasks:
+    - name: Operating System Check
+      ansible.builtin.fail:
+        msg: "This playbook will only work on RHEL 8 systems"
+      when:
+        - ansible_distribution != "RedHat"
+        - ansible_distribution_major_version >= 8
+
+    # this is not good for prod use but simply doing it to make configuration easier
+    - name: Disable firewalld
+      ansible.builtin.service:
+        name: firewalld
+        state: stopped
+        enabled: no
+
+    - name: Register RHEL system
+      community.general.redhat_subscription:
+        state: present
+        username: "{{ redhat_username }}"
+        password: "{{ redhat_password }}"
+        auto_attach: true
+      no_log: true
+
+  tasks:
+    - name: Add required repos
+      community.general.rhsm_repository:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - jb-eap-7.4-for-rhel-8-x86_64-rpms
+        - rhel-8-for-x86_64-baseos-rpms
+        - rhel-8-for-x86_64-appstream-rpms
+        - rh-sso-7.5-for-rhel-8-x86_64-rpms
+
+    - name: Install Java
+      ansible.builtin.yum:
+        name: java
+        state: present
+
+    - name: Install Red Hat SSO
+      ansible.builtin.yum:
+        name: "@Red Hat Single Sign-On 7.5"
+        state: present
+
+    - name: Start sso service
+      ansible.builtin.service:
+        name: rh-sso7
+        state: started
+        enabled: yes
+
+    - name: Create admin user
+      ansible.builtin.command: sh add-user-keycloak.sh -r master -u admin3 -p admin
+      args:
+        chdir: /opt/rh/rh-sso7/root/usr/share/keycloak/bin
+      tags: create_admin
+      notify: restart sso
